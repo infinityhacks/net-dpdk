@@ -405,7 +405,7 @@ dataplane_loop(__rte_unused void *arg)
 }
 
 static int
-ctlplane_loop(void)
+ctrlplane_loop(void)
 {
 	uint8_t i, nb_ports = rte_eth_dev_count();
 	int32_t f_stop;
@@ -1008,7 +1008,7 @@ main(int argc, char** argv)
 
 	/* Launch per-lcore function on every lcore */
 	rte_eal_mp_remote_launch(dataplane_loop, NULL, SKIP_MASTER);
-	ctlplane_loop();
+	ctrlplane_loop();
 	RTE_LCORE_FOREACH_SLAVE(i) {
 		if (rte_eal_wait_lcore(i) < 0)
 			return -1;
