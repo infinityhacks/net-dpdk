@@ -47,7 +47,7 @@ endif
 LIB = libnet.a
 
 # all source are stored in SRCS-y
-SRCS-y := if_ethersubr.c
+SRCS-y := if_ethersubr.c netisr.c
 
 CFLAGS += -O3
 #CFLAGS += $(WERROR_FLAGS)
