@@ -44,15 +44,13 @@ please change the definition of the RTE_TARGET environment variable)
 endif
 
 # binary name
-APP = dpdkvs
+LIB = libnetlink.a
 
 # all source are stored in SRCS-y
-SRCS-y := main.c kip_monitor.c
+SRCS-y := libgenl.c ll_map.c libnetlink.c
 
-CFLAGS += -O3 -I$(LVS_CORE_DIR)/include -I$(LVS_DPDK_DIR)/include
+CFLAGS += -O3
+CFLAGS += -I$(LVS_DPDK_DIR)/include 
 #CFLAGS += $(WERROR_FLAGS)
 
-DPDKVS_LDLIBS += -lnetlink
-EXTRA_LDFLAGS += -L$(LVS_DPDK_DIR)/lib/build $(DPDKVS_LDLIBS)
-
-include $(RTE_SDK)/mk/rte.extapp.mk
+include $(RTE_SDK)/mk/rte.extlib.mk

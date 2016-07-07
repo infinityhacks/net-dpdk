@@ -79,6 +79,12 @@
  */
 static struct netisr_proto	netisr_proto[NETISR_MAXPROT];
 
+#define	NETISR_DEFAULT_MAXQLIMIT	10240
+static u_int	netisr_maxqlimit = NETISR_DEFAULT_MAXQLIMIT;
+
+#define	NETISR_DEFAULT_DEFAULTQLIMIT	256
+static u_int	netisr_defaultqlimit = NETISR_DEFAULT_DEFAULTQLIMIT;
+
 /*
  * Dispatch a packet for netisr processing; direct dispatch is permitted by
  * calling context.
@@ -109,4 +115,109 @@ netisr_dispatch(u_int proto, struct rte_mbuf *m)
 {
 
 	return (netisr_dispatch_src(proto, 0, m));
+}
+
+/*
+ * Register a new netisr handler, which requires initializing per-protocol
+ * fields for each workstream.  All netisr work is briefly suspended while
+ * the protocol is installed.
+ */
+void
+netisr_register(const struct netisr_handler *nhp)
+{
+	const char *name;
+	u_int i, proto;
+
+	proto = nhp->nh_proto;
+	name = nhp->nh_name;
+
+	/*
+	 * Test that the requested registration is valid.
+	 */
+	KASSERT(nhp->nh_name != NULL,
+	    ("%s: nh_name NULL for %u", __func__, proto));
+	KASSERT(nhp->nh_handler != NULL,
+	    ("%s: nh_handler NULL for %s", __func__, name));
+	KASSERT(nhp->nh_policy == NETISR_POLICY_SOURCE ||
+	    nhp->nh_policy == NETISR_POLICY_FLOW ||
+	    nhp->nh_policy == NETISR_POLICY_CPU,
+	    ("%s: unsupported nh_policy %u for %s", __func__,
+	    nhp->nh_policy, name));
+	KASSERT(nhp->nh_policy == NETISR_POLICY_FLOW ||
+	    nhp->nh_m2flow == NULL,
+	    ("%s: nh_policy != FLOW but m2flow defined for %s", __func__,
+	    name));
+	KASSERT(nhp->nh_policy == NETISR_POLICY_CPU || nhp->nh_m2cpuid == NULL,
+	    ("%s: nh_policy != CPU but m2cpuid defined for %s", __func__,
+	    name));
+	KASSERT(nhp->nh_policy != NETISR_POLICY_CPU || nhp->nh_m2cpuid != NULL,
+	    ("%s: nh_policy == CPU but m2cpuid not defined for %s", __func__,
+	    name));
+	KASSERT(nhp->nh_dispatch == NETISR_DISPATCH_DEFAULT ||
+	    nhp->nh_dispatch == NETISR_DISPATCH_DEFERRED ||
+	    nhp->nh_dispatch == NETISR_DISPATCH_HYBRID ||
+	    nhp->nh_dispatch == NETISR_DISPATCH_DIRECT,
+	    ("%s: invalid nh_dispatch (%u)", __func__, nhp->nh_dispatch));
+
+	KASSERT(proto < NETISR_MAXPROT,
+	    ("%s(%u, %s): protocol too big", __func__, proto, name));
+
+	/*
+	 * Test that no existing registration exists for this protocol.
+	 */
+	NETISR_WLOCK();
+	KASSERT(netisr_proto[proto].np_name == NULL,
+	    ("%s(%u, %s): name present", __func__, proto, name));
+	KASSERT(netisr_proto[proto].np_handler == NULL,
+	    ("%s(%u, %s): handler present", __func__, proto, name));
+
+	netisr_proto[proto].np_name = name;
+	netisr_proto[proto].np_handler = nhp->nh_handler;
+	netisr_proto[proto].np_m2flow = nhp->nh_m2flow;
+	netisr_proto[proto].np_m2cpuid = nhp->nh_m2cpuid;
+	netisr_proto[proto].np_drainedcpu = nhp->nh_drainedcpu;
+
+	if (nhp->nh_qlimit == 0)
+		netisr_proto[proto].np_qlimit = netisr_defaultqlimit;
+	else if (nhp->nh_qlimit > netisr_maxqlimit) {
+		printf("%s: %s requested queue limit %u capped to "
+		    "net.isr.maxqlimit %u\n", __func__, name, nhp->nh_qlimit,
+		    netisr_maxqlimit);
+		netisr_proto[proto].np_qlimit = netisr_maxqlimit;
+	} else
+		netisr_proto[proto].np_qlimit = nhp->nh_qlimit;
+	netisr_proto[proto].np_policy = nhp->nh_policy;
+	netisr_proto[proto].np_dispatch = nhp->nh_dispatch;
+}
+
+/*
+ * Remove the registration of a network protocol, which requires clearing
+ * per-protocol fields across all workstreams, including freeing all mbufs in
+ * the queues at time of unregister.  All work in netisr is briefly suspended
+ * while this takes place.
+ */
+void
+netisr_unregister(const struct netisr_handler *nhp)
+{
+	const char *name;
+	u_int i, proto;
+
+	proto = nhp->nh_proto;
+	name = nhp->nh_name;
+
+	KASSERT(proto < NETISR_MAXPROT,
+	    ("%s(%u): protocol too big for %s", __func__, proto, name));
+
+	NETISR_WLOCK();
+	KASSERT(netisr_proto[proto].np_handler != NULL,
+	    ("%s(%u): protocol not registered for %s", __func__, proto,
+	    name));
+
+
+	netisr_proto[proto].np_name = NULL;
+	netisr_proto[proto].np_handler = NULL;
+	netisr_proto[proto].np_m2flow = NULL;
+	netisr_proto[proto].np_m2cpuid = NULL;
+	netisr_proto[proto].np_qlimit = 0;
+	netisr_proto[proto].np_policy = 0;
 }
